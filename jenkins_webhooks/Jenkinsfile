@@ -1,0 +1,53 @@
+pipeline {
+    agent any
+    
+    stages {
+        stage('Build Stage') {
+            when {
+                expression { 
+                    return env.BRANCH_NAME == 'stage'
+                }
+            }
+            steps {
+                echo 'Building stage branch...'
+            }
+        }
+        stage('Build Dev') {
+            when {
+                expression { 
+                    return env.BRANCH_NAME == 'dev'
+                }
+            }
+            steps {
+                echo 'Building dev branch...'
+            }
+        }       
+        stage('Build Pre-Pod') {
+            when {
+                expression { 
+                    return env.BRANCH_NAME == 'pre-pod'
+                }
+            }
+            steps {
+                echo 'Building pre-pod branch...'
+            }
+        }
+        stage('Build Pod') {
+            when {
+                expression { 
+                    return env.BRANCH_NAME == 'pod'
+                }
+            }
+            steps {
+                script {
+                    userInput = input(id: 'userInput', message: 'Are you sure you want to build the pod branch?', parameters: [booleanParam(defaultValue: false, description: 'Proceed with the build?', name: 'Proceed')])
+                    if (userInput) {
+                        echo 'Building prod branch...'
+                    } else {
+                        echo 'Skipping build for pod branch.'
+                    }
+                }
+            }
+        }
+    }
+}

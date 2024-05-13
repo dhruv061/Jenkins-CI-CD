@@ -1,0 +1,47 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('User Confirmation') {
+            steps {
+                script {
+                    def userInput = input(
+                        id: 'userConfirmation',
+                        message: 'Do you want to continue with the deployment?',
+                        parameters: [
+                            choice(choices: ['Continue', 'Abort'], description: 'Choose action', name: 'ACTION')
+                        ]
+                    )
+                    if (userInput == 'Abort') {
+                        error('Production deployment aborted by the user.')
+                    }
+                }
+            }
+        }
+
+        stage('Branch Name') {
+            steps {
+                script {
+                    def branchName = sh(returnStdout: true, script: 'git rev-parse --abbrev-ref HEAD').trim()
+                    echo "Branch Name: ${branchName}"
+                }
+            }
+        }
+
+        stage('Build Code') {
+            steps {
+                script {
+                    echo 'Placeholder for Build Code'
+                }
+            }
+        }
+
+        stage('Test Code') {
+            steps {
+                script {
+                    echo 'Placeholder for Test Code'
+                }
+            }
+        }
+    }
+}

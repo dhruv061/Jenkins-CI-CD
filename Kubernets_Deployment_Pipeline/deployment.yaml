@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hello-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: DemoApp
+  template:
+    metadata:
+      labels:
+        app: DemoApp
+    spec:
+      containers:
+        - name: hello-app-container
+          image: 533267294726.dkr.ecr.ap-south-1.amazonaws.com/jenkins-k8-deployment:${IMAGE_TAG}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+

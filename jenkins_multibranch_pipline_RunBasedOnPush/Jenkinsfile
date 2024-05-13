@@ -1,0 +1,43 @@
+pipeline {
+    agent any
+    
+    stages {
+        stage('Stage') {
+            when {
+                branch 'stage'
+            }
+            steps {
+                echo 'Running Stage deployment...'
+            }
+        }
+        stage('Dev') {
+            when {
+                branch 'dev'
+            }
+            steps {
+                echo 'Running Dev deployment...'
+            }
+        }
+        stage('Pre-Prod') {
+            when {
+                branch 'pre-prod'
+            }
+            steps {
+                echo 'Running Pre-Prod deployment...'
+            }
+        }
+        stage('Prod') {
+            when {
+                branch 'prod'
+            }
+            // ask user at run-time of this pipline to continye or abort?
+            input {
+                message "Should we deploy to Prod?"
+                ok "Yes, we should"
+            }
+            steps {
+                echo "Running Prod deployment..."
+            }
+        }
+    }
+}
