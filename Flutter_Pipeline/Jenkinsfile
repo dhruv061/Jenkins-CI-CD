@@ -1,0 +1,196 @@
+pipeline {
+    agent any
+
+    environment {
+        
+        // Flutter path on server.
+        FLUTTER_PATH = "/opt/flutter/bin"
+
+        //S3 settings
+        S3_BUCKET = "flutter-projects-build"
+        PROJECT_FOLDER = "fidali"
+        S3_Folder_STAG = "stag"
+        S3_Folder_PROD = "prod"
+
+        //Build Name for diffrent enviroment
+        BUILD_NAME_STAG = "app-staging-release" // Ask Developer
+        BUILD_NAME_PROD = "app-production-release" // Ask Developer
+
+        // For commit
+        STAG_COMMIT = "stag-build"
+        PROD_COMMIT = "prod-build"
+
+        // Email details
+        RECIPIENTS = "varshil.s@yudiz.com, dhruv.mavani@yudizsolutions.com"
+    }
+
+    stages {
+
+        //Checkout The Code...
+        stage('Checkout') {
+            steps {
+                script {
+                    checkout scm
+                    env.COMMIT_MESSAGE = sh(script: "git log -1 --pretty=%B", returnStdout: true).trim()
+                    echo "Commit Message: ${env.COMMIT_MESSAGE}"
+                }
+            }
+        }
+
+        //Verfiy the Commit message to Run Pipeline....
+        stage('Validate Commit Message') {
+            steps {
+                script {
+                    if (!(env.COMMIT_MESSAGE.contains("$STAG_COMMIT") || env.COMMIT_MESSAGE.contains("$PROD_COMMIT"))) {
+                        echo "❌ No valid commit message found. Aborting pipeline."
+                        currentBuild.result = 'ABORTED'
+                        error("Pipeline stopped because commit message is not 'stag-build' or 'prod-build'.")
+                    } else {
+                        echo "✅ Commit message is valid. Proceeding with the pipeline."
+                    }
+                }
+            }
+        }
+        
+        //Check fluter version and all flutter dependacies
+        stage('Setup Flutter') {
+            steps {
+                script {
+                    sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter --version && flutter doctor'
+                }
+            }
+        }
+
+        //Clear the flutter build and install depedancies.
+        stage('Install Dependencies') {
+            steps {
+                sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter clean'
+                sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter pub get'
+            }
+        }
+        
+        //Create Build based on enviroment and Rename the Build
+        stage('Build APK') {
+            steps {
+                script {
+                    // For TimeStamp
+                    def buildTimestamp = sh(script: 'TZ=Asia/Kolkata date +"%Y-%m-%d_%H:%M:%S"', returnStdout: true).trim()
+                    def renamedApk = ""
+
+                    // Create Build
+                    if (env.COMMIT_MESSAGE.contains("$STAG_COMMIT")) {
+                        // Rename the Build for STAG
+                        def apkFilePath = "build/app/outputs/flutter-apk/${BUILD_NAME_STAG}.apk"
+                        renamedApk = "build/app/outputs/flutter-apk/${BUILD_NAME_STAG}-${buildTimestamp}.apk"
+
+                        echo "Running Staging Build"
+                        sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter build apk --release --flavor staging --target=lib/main_staging.dart'
+                        sh "mv ${apkFilePath} ${renamedApk}"
+                    }  else if (env.COMMIT_MESSAGE.contains("$PROD_COMMIT")) {
+                        // Rename the Build for PROD
+                        def apkFilePath = "build/app/outputs/flutter-apk/${BUILD_NAME_PROD}.apk"
+                        renamedApk = "build/app/outputs/flutter-apk/${BUILD_NAME_PROD}-${buildTimestamp}.apk"
+
+                        echo "Running Production Build"
+                        sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter build apk --release --flavor production --target=lib/main_production.dart'
+                        sh "mv ${apkFilePath} ${renamedApk}"
+                    } else {
+                        echo "No valid commit message found, skipping build."
+                        currentBuild.result = 'ABORTED'
+                        error("Pipeline stopped because commit message is not 'stag' or 'prod'.")
+                    }
+                    
+                    // Final Build Name
+                    env.BUILT_APK = renamedApk
+                }
+            }
+        }
+
+        //Upload Build to the S3
+        stage('Upload to S3') {
+            steps {
+                script {
+                    def s3Folder = ""
+
+                    if (env.COMMIT_MESSAGE.contains("$STAG_COMMIT")) {
+                        s3Folder = "$S3_Folder_STAG"
+                    } else if (env.COMMIT_MESSAGE.contains("$PROD_COMMIT")) {
+                        s3Folder = "$S3_Folder_PROD"
+                    } else {
+                        echo "No valid commit message for S3 upload."
+                        currentBuild.result = 'ABORTED'
+                        error("Pipeline stopped because commit message is not 'stag' or 'prod'.")
+                    }
+
+                    echo "Uploading APK to S3: s3://${S3_BUCKET}/${PROJECT_FOLDER}/${s3Folder}/"
+                    sh "aws s3 cp ${env.BUILT_APK} s3://${S3_BUCKET}/${PROJECT_FOLDER}/${s3Folder}/ --profile s3-full-access"
+
+                    // Generate S3 download link
+                    env.S3_DOWNLOAD_LINK = "https://${S3_BUCKET}.s3.amazonaws.com/${PROJECT_FOLDER}/${s3Folder}/${env.BUILT_APK.split('/').last()}"
+                    
+                    echo "S3 Download Link: ${env.S3_DOWNLOAD_LINK}"
+                }
+            }
+        }
+    }
+    
+    //Send Email Notification's
+    post {
+        success {
+            script {
+                //Select Build name based on commit message
+                def selectedBuildName = env.COMMIT_MESSAGE.contains("$STAG_COMMIT") ? BUILD_NAME_STAG : BUILD_NAME_PROD
+
+                echo "Build succeeded! Sending success email."
+
+                //Sending Mail
+                emailext subject: "✅ Build Success: ${PROJECT_FOLDER} | ${selectedBuildName}.apk",
+                    body: """
+                    <h2>Build Successful 🎉</h2>
+                    <p>The build for <b> ${PROJECT_FOLDER} | ${selectedBuildName}.apk </b> has completed successfully.</p>
+                    <p>Download the APK from the following link:</p>
+                    <p><a href="${env.S3_DOWNLOAD_LINK}">${env.S3_DOWNLOAD_LINK}</a></p>
+                    """,
+                    to: "${RECIPIENTS}",
+                    mimeType: 'text/html'
+            }
+        }
+
+        failure {
+            script {
+                //Select Build name based on commit message
+                def selectedBuildName = env.COMMIT_MESSAGE.contains("$STAG_COMMIT") ? BUILD_NAME_STAG : BUILD_NAME_PROD
+
+                echo "Build failed! Sending failure email."
+
+                //Sending Mail
+                emailext subject: "❌ Build Failed: ${PROJECT_FOLDER} | ${selectedBuildName}.apk",
+                    body: """
+                    <h2>Build Failed 🚨</h2>
+                    <p>The build for <b> ${PROJECT_FOLDER} | ${selectedBuildName}.apk </b> has failed.</p>
+                    <p>Check the Jenkins logs for more details.</p>
+                    """,
+                    to: "${RECIPIENTS}",
+                    mimeType: 'text/html'
+            }
+        }
+
+        aborted {
+            script {
+                echo "Pipeline was aborted due to an invalid commit message. Sending notification email."
+
+                //Sending Mail
+                emailext subject: "⚠️ Pipeline Aborted: Invalid Commit Message",
+                    body: """
+                    <h2>Pipeline Aborted ⚠️</h2>
+                    <p>The pipeline was aborted because the commit message did not match the expected patterns ('stag-build' or 'prod-build').</p>
+                    <p><b>Used Commit Message:</b> ${env.COMMIT_MESSAGE}</p>
+                    <p>Please use the correct commit message and trigger the pipeline again.</p>
+                    """,
+                    to: "${RECIPIENTS}",
+                    mimeType: 'text/html'
+            }
+        }
+    }
+
+}
