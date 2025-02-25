@@ -3,7 +3,7 @@ FLUTTER_PATH=/opt/flutter/bin
 
 # S3 settings
 S3_BUCKET=flutter-projects-build
-PROJECT_FOLDER=fidali-host
+PROJECT_FOLDER=project-name
 S3_Folder_STAG=stag
 S3_Folder_PROD=prod
 
@@ -16,7 +16,7 @@ STAG_COMMIT=stag-build
 PROD_COMMIT=prod-build
 
 # Email details
-RECIPIENTS=varshil.s@yudiz.com, ravi.kyada@yudiz.com
+RECIPIENTS=ravi.kyada@yudiz.com
 CC_RECIPIENTS=dhruv.mavani@yudizsolutions.com
 
 # Test cases log file

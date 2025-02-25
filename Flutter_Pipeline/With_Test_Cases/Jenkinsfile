@@ -7,7 +7,7 @@ pipeline {
 
         //S3 settings
         S3_BUCKET = 'flutter-projects-build'
-        PROJECT_FOLDER = 'fidali-host'
+        PROJECT_FOLDER = 'project-name'
         S3_Folder_STAG = 'stag'
         S3_Folder_PROD = 'prod'
 

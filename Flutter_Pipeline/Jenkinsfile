@@ -8,7 +8,7 @@ pipeline {
 
         //S3 settings
         S3_BUCKET = "flutter-projects-build"
-        PROJECT_FOLDER = "fidali"
+        PROJECT_FOLDER = "project"
         S3_Folder_STAG = "stag"
         S3_Folder_PROD = "prod"
 
@@ -21,7 +21,7 @@ pipeline {
         PROD_COMMIT = "prod-build"
 
         // Email details
-        RECIPIENTS = "varshil.s@yudiz.com, dhruv.mavani@yudizsolutions.com"
+        RECIPIENTS = "dhruv.mavani@yudizsolutions.com"
     }
 
     stages {

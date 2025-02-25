@@ -17,7 +17,7 @@ All learning Pipeline for Jenkins.
 ├── With_Test_Cases
 │   └── Jenkinsfile
 └── With_Test_Cases_AND_Jenkins_Secrates
-    ├── fidali_host_var.txt
+    ├── project_host_var.txt
     └── Jenkinsfile
 ```
 
@@ -60,7 +60,7 @@ This pipeline **builds an APK**, uploads it to **S3 Bucket**, and **sends an ema
 
 **💡 In this method, we store all environment variables in Jenkins credentials as a secret and use them in the pipeline.**
 
-#### How to Create Secrate File name "fidali_host_var.txt" in jenkins,
+#### How to Create Secrate File name "project_host_var.txt" in jenkins,
 
 1 -  **Navigate to:**  
    - Jenkins ➝ **Manage Jenkins**  
@@ -68,13 +68,13 @@ This pipeline **builds an APK**, uploads it to **S3 Bucket**, and **sends an ema
 
 ![Jenkins Credentials Setup](.images/secrats.png)
 
-- We define an ID (like 'fidali_host_var') when we are setting up secrets in jenkins credentials and use it in Jenkinsfile.
+- We define an ID (like 'project_host_var') when we are setting up secrets in jenkins credentials and use it in Jenkinsfile.
 ```json
     ...
     stage('Load Environment Variables') {
         steps {
             script {
-                withCredentials([file(credentialsId: 'fidali_host_var', variable: 'ENV_FILE')]) {
+                withCredentials([file(credentialsId: 'project_host_var', variable: 'ENV_FILE')]) {
                     .....
                     .....
                 }
