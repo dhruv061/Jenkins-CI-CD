@@ -66,7 +66,7 @@ This pipeline **builds an APK**, uploads it to **S3 Bucket**, and **sends an ema
    - Jenkins ➝ **Manage Jenkins**  
    - **Credentials** ➝ System ➝ Global credentials (unrestricted)  
 
-![Jenkins Credentials Setup](.images/secrats.png)
+![Jenkins Credentials Setup](.images/creds.png)
 
 - We define an ID (like 'project_host_var') when we are setting up secrets in jenkins credentials and use it in Jenkinsfile.
 ```json
