@@ -94,7 +94,7 @@ This pipeline **builds an APK**, uploads it to **S3 Bucket**, and **sends an ema
 | `worker_test.dart`              | ❌ No test case      | ❌ No Build        |
 
 > ⚠️ **NOTE:**  
-> To trigger the pipeline, use the correct commit message format.  
+> To trigger the pipeline, use the correct commit message format..
 
 
 
