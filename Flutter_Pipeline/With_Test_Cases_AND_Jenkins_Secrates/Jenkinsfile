@@ -1,0 +1,268 @@
+pipeline {
+    agent any
+
+    stages {
+        
+        //Checkout The Code...
+        stage('Checkout') {
+            steps {
+                script {
+                    checkout scm
+                    env.COMMIT_MESSAGE = sh(script: 'git log -1 --pretty=%B', returnStdout: true).trim()
+                    echo "Commit Message: ${env.COMMIT_MESSAGE}"
+                }
+            }
+        }
+
+        //Load All environment variables from secrets
+        stage('Load Environment Variables') {
+            steps {
+                script {
+                    // Use the secret file
+                    withCredentials([file(credentialsId: 'fidali_host_var', variable: 'ENV_FILE')]) {
+                        // Read the file and load environment variables
+                        def envVars = readProperties file: env.ENV_FILE
+                        
+                        //#########################--Set environment variables for the pipeline--##################################//
+
+                        //Flutter settings
+                        env.FLUTTER_PATH = envVars.FLUTTER_PATH
+
+                        // S3 settings
+                        env.S3_BUCKET = envVars.S3_BUCKET
+                        env.PROJECT_FOLDER = envVars.PROJECT_FOLDER
+                        env.S3_Folder_STAG = envVars.S3_Folder_STAG
+                        env.S3_Folder_PROD = envVars.S3_Folder_PROD
+
+                        // Build names for different environments
+                        env.BUILD_NAME_STAG = envVars.BUILD_NAME_STAG
+                        env.BUILD_NAME_PROD = envVars.BUILD_NAME_PROD
+
+                        // Commit messages
+                        env.STAG_COMMIT = envVars.STAG_COMMIT
+                        env.PROD_COMMIT = envVars.PROD_COMMIT
+
+                        // Email details
+                        env.RECIPIENTS = envVars.RECIPIENTS
+                        env.CC_RECIPIENTS = envVars.CC_RECIPIENTS
+
+                        // Test cases log file
+                        env.TEST_LOG_FILE = envVars.TEST_LOG_FILE
+
+                        //##########################################################################################//
+                    }
+                }
+            }
+        }
+        
+        //Verfiy the Commit message to Run Pipeline....
+        stage('Validate Commit Message and Extract Test File') {
+            steps {
+                script {
+                    // Extract test file name from commit messge
+                    def testFilePattern = env.COMMIT_MESSAGE =~ /\b\w+_test\.dart\b/
+                    env.TEST_FILE = testFilePattern.find() ? testFilePattern.group(0) : null
+                    
+                    // Extract build enviroment name (stag-build OR prod-builf) from commit messge
+                    def hasBuildType = env.COMMIT_MESSAGE.contains("$STAG_COMMIT") || env.COMMIT_MESSAGE.contains("$PROD_COMMIT")
+                    
+                    //If commit messge is not correct abort the pipeline
+                    if (!hasBuildType) {
+                        echo '❌ No valid build type found in commit message. Aborting pipeline.'
+                        currentBuild.result = 'ABORTED'
+                        error("Pipeline stopped because commit message doesn't contain 'stag-build' or 'prod-build'.")
+                    } else {
+                        echo '✅ Build type is valid. Proceeding with the pipeline.'
+
+                        //Just print Test file name if commit messh is valid
+                        if (env.TEST_FILE) {
+                            echo "✅ Test file found: ${env.TEST_FILE}"
+                        } else {
+                            echo "ℹ️ No test file specified in commit message. Skipping tests."
+                        }
+                    }
+                }
+            }
+        }
+
+        //Check fluter version and all flutter dependacies
+        stage('Setup Flutter') {
+            steps {
+                script {
+                    sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter --version && flutter doctor'
+                }
+            }
+        }
+
+        //Clear the flutter build and install depedancies.
+        stage('Install Dependencies') {
+            steps {
+                sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter clean'
+                sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter pub get'
+            }
+        }
+
+        //Run the test cases
+        stage('Run Tests') {
+            steps {
+                script {
+                    if (env.TEST_FILE == null || env.TEST_FILE == 'null') {
+                        echo "⚠️ No test file found. Skipping test stage..."
+                    } else {
+                        echo "Running test file: ${env.TEST_FILE}"
+                        // Save the test cases output in log file, will attach this on mail
+                        sh """
+                            echo "Test Execution Log for ${env.TEST_FILE}" > ${TEST_LOG_FILE}
+                            echo "Date: \$(date)" >> ${TEST_LOG_FILE}
+                            echo "----------------------------------------" >> ${TEST_LOG_FILE}
+                            export PATH="\$PATH:$FLUTTER_PATH"
+                            flutter test test/${env.TEST_FILE} 2>&1 | tee -a ${TEST_LOG_FILE}
+                        """
+
+                    }
+                }
+            }
+        }
+
+        //Create Build based on enviroment and Rename the Build
+        stage('Build APK') {
+            steps {
+                script {
+                    // Get TimeStamp
+                    def buildTimestamp = sh(script: 'TZ=Asia/Kolkata date +"%Y-%m-%d_%H:%M:%S"', returnStdout: true).trim()
+                    def renamedApk = ''
+
+                    // Create Build
+                    if (env.COMMIT_MESSAGE.contains("$STAG_COMMIT")) {
+
+                        // Rename the Build for STAG
+                        def apkFilePath = "build/app/outputs/flutter-apk/${BUILD_NAME_STAG}.apk"
+                        renamedApk = "build/app/outputs/flutter-apk/${BUILD_NAME_STAG}-${buildTimestamp}.apk"
+
+                        echo 'Running Staging Build'
+                        sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter build apk --release --flavor staging --target=lib/main_staging.dart'
+                        sh "mv ${apkFilePath} ${renamedApk}"
+                    } else if (env.COMMIT_MESSAGE.contains("$PROD_COMMIT")) {
+
+                        // Rename the Build for PROD
+                        def apkFilePath = "build/app/outputs/flutter-apk/${BUILD_NAME_PROD}.apk"
+                        renamedApk = "build/app/outputs/flutter-apk/${BUILD_NAME_PROD}-${buildTimestamp}.apk"
+
+                        echo 'Running Production Build'
+                        sh 'export PATH="$PATH:$FLUTTER_PATH" && flutter build apk --release --flavor production --target=lib/main_production.dart'
+                        sh "mv ${apkFilePath} ${renamedApk}"
+                    }
+
+                    // Final Build Name
+                    env.BUILT_APK = renamedApk
+                }
+            }
+        }
+
+        //Upload Build to the S3
+        stage('Upload to S3') {
+            steps {
+                script {
+                    //Get S3 Bucket Name
+                    def s3Folder = env.COMMIT_MESSAGE.contains("$STAG_COMMIT") ? "$S3_Folder_STAG" : "$S3_Folder_PROD"
+
+                    echo "Uploading APK to S3: s3://${S3_BUCKET}/${PROJECT_FOLDER}/${s3Folder}/"
+                    sh "aws s3 cp ${env.BUILT_APK} s3://${S3_BUCKET}/${PROJECT_FOLDER}/${s3Folder}/ --profile s3-full-access"
+
+                    // Generate S3 download link
+                    env.S3_DOWNLOAD_LINK = "https://${S3_BUCKET}.s3.amazonaws.com/${PROJECT_FOLDER}/${s3Folder}/${env.BUILT_APK.split('/').last()}"
+                    echo "S3 Download Link: ${env.S3_DOWNLOAD_LINK}"
+                }
+            }
+        }
+    }
+
+    //Send Email Notification's
+    post {
+        success {
+            script {
+                //Select Build name based on commit message
+                def selectedBuildName = env.COMMIT_MESSAGE.contains("$STAG_COMMIT") ? BUILD_NAME_STAG : BUILD_NAME_PROD
+
+                //testStatus variable for printing messge reafinf test cass file name
+                def testStatus = ""
+                
+                //If test cases run then only send this on mail
+                if (env.TEST_FILE != 'null') {
+                    testStatus = """
+                        <p><h4>✅ Test Details:</h4></p>
+                        <ul>
+                            <li>Test file executed: ${env.TEST_FILE}</li>
+                            <li>Complete test execution log is attached to this email</li>
+                        </ul>
+                    """
+                } 
+
+                 //Build mail with APK link and test case log file attachment if test cases runs
+                emailext subject: "✅ Build Success: ${PROJECT_FOLDER} | ${selectedBuildName}.apk",
+                    body: """
+                    <h2>Build Successful 🎉</h2>
+                    <p>The build for <b>${PROJECT_FOLDER} | ${selectedBuildName}.apk</b> has completed successfully.</p>
+                    ${testStatus}
+                    <p>Download the APK from the following link:</p>
+                    <p><a href="${env.S3_DOWNLOAD_LINK}">${env.S3_DOWNLOAD_LINK}</a></p>
+                    """,
+                    to: "${RECIPIENTS}, cc:${CC_RECIPIENTS}",
+                    mimeType: 'text/html',
+                    attachmentsPattern: (env.TEST_FILE != 'null' && env.TEST_LOG_FILE) ? "${TEST_LOG_FILE}" : null
+            }
+        }
+
+        failure {
+            script {
+                //Select Build name based on commit message
+                def selectedBuildName = env.COMMIT_MESSAGE.contains("$STAG_COMMIT") ? BUILD_NAME_STAG : BUILD_NAME_PROD
+
+                //testStatus variable for printing messge reafinf test cass file name
+                def testStatus = ""
+
+                //If test cases run then only send this on mail
+                if (env.TEST_FILE != 'null') {
+                    testStatus = """
+                        <p><h4>❌Test Details:</h4></p>
+                        <ul>
+                            <li>Test file that failed: ${env.TEST_FILE}</li>
+                            <li>Complete test execution log is attached to this email</li>
+                        </ul>
+                    """
+                }
+                
+                //Build mail with APK link and test case log file attachment if test cases runs
+                emailext subject: "❌ Build Failed: ${PROJECT_FOLDER} | ${selectedBuildName}.apk",
+                    body: """
+                    <h2>Build Failed 🚨</h2>
+                    <p>The build for <b>${PROJECT_FOLDER} | ${selectedBuildName}.apk</b> has failed.</p>
+                    ${testStatus}
+                    <p>Check the Jenkins logs for more details.</p>
+                    """,
+                    to: "${RECIPIENTS}, cc:${CC_RECIPIENTS}",
+                    mimeType: 'text/html',
+                    attachmentsPattern: (env.TEST_FILE != 'null' && env.TEST_LOG_FILE) ? "${TEST_LOG_FILE}" : null
+            }
+        }
+
+        // Aborted mail message
+        aborted {
+            script {
+                emailext subject: '⚠️ Pipeline Aborted: Invalid Commit Message',
+                    body: """
+                    <h2>Pipeline Aborted ⚠️</h2>
+                    <p>The pipeline was aborted because the commit message format was invalid.</p>
+                    <p><b>Used Commit Message:</b> ${env.COMMIT_MESSAGE}</p>
+                    <p>Please use the correct format:</p>
+                    <ul>
+                        <li>For builds with tests: "stag-build filename_test.dart" or "prod-build filename_test.dart"</li>
+                        <li>For builds without tests: "stag-build" or "prod-build"</li>
+                    </ul>
+                    """,
+                    to: "${RECIPIENTS}, cc:${CC_RECIPIENTS}",
+                    mimeType: 'text/html'
+            }
+        }
+    }
+}
